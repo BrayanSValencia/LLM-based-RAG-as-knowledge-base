@@ -23,11 +23,12 @@ import pymupdf4llm
 # Progress bar utility for long-running loops with live terminal updates.
 import alive_progress
 
+import re
 
 #Creates a vector database with Chroma for querying its documents.
 
-CHROMA_PATH = "chroma"
-INPUT_FOLDER="data/rawdocs"
+CHROMA_PATH = "databases/chroma"
+INPUT_FOLDER="databases/pdfbooksarticles"
 PROCESSED_FILES_ARCHIVE="processedfiles.txt"
 def main():
     generate_data_store()
@@ -40,6 +41,11 @@ def generate_data_store():
 
 def remove_processed_files(pdf_files):
     
+    archive_path = Path(PROCESSED_FILES_ARCHIVE)
+
+    if not archive_path.exists():
+        archive_path.write_text("", encoding="utf-8")  # create empty file
+        
     with open(PROCESSED_FILES_ARCHIVE, "r", encoding="utf-8") as file:
         processed_filenames = [line.strip().replace("\\", "/") for line in file]
 
@@ -109,12 +115,19 @@ def split_text(documents: list[Document]) -> list[Document]:
         length_function=len,
         add_start_index=True,
         # Try to split first by sentence-ending punctuation, then fallback to spaces, then characters
-        separators=["\n\n", ".","\n","!", "?", " ", ""]
+        separators=[".","!", "?"]
     )
 
     chunks = text_splitter.split_documents(documents)
+    
+    # Filter out short chunks
+    min_length = 50  
+    filtered_chunks = [chunk for chunk in chunks if len(chunk.page_content.strip()) >= min_length]
 
-    for i, chunk in enumerate(chunks):
+    for i, chunk in enumerate(filtered_chunks):
+        # Clean the text: replace newlines with space and strip extra spaces
+        clean_text = re.sub(r'\n', ' ', chunk.page_content)
+        chunk.page_content = clean_text
         chunk.metadata["chunk_index"] = i
         # Ensure page_number and file_path metadata are present
         if "page_number" not in chunk.metadata:
@@ -122,8 +135,8 @@ def split_text(documents: list[Document]) -> list[Document]:
         if "file_path" not in chunk.metadata:
             chunk.metadata["file_path"] = "unknown"
 
-    print(f"✅ Split {len(documents)} pages into {len(chunks)} text chunks.")
-    return chunks
+    print(f"✅ Split {len(documents)} pages into {len(filtered_chunks)} text chunks.")
+    return filtered_chunks
 
 
 def save_to_chroma(chunks: list[Document]):
